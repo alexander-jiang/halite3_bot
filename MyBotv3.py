@@ -22,7 +22,7 @@ EXPLORING = 0
 RETURNING = 1
 
 
-game.ready("LocalSwarmBot")
+game.ready("LocalSwarmBotv3")
 
 while True:
     # Get the latest game state.
@@ -43,27 +43,27 @@ while True:
             ship_birth[ship.id] = game.turn_number - 1
         if ship.id not in ship_return_amount:
             ship_return_amount[ship.id] = 0
-        
+
         if game.turn_number % 100 == 0:
             logging.info("Ship {} log: born turn {}.".format(ship.id, ship_birth[ship.id]))
             logging.info("now has {}, total dropped off {}".format(ship.halite_amount, ship_tally[ship.id]))
 
 #        logging.info("Ship {} (status: {}) has {} halite.".format(ship.id, ship_status[ship.id], ship.halite_amount))
-            
+
         if ship_status[ship.id] == RETURNING:
             # once ship has dropped off halite, switch to explore
             if ship.position == me.shipyard.position:
                 ship_status[ship.id] = EXPLORING
             elif game_map.calculate_distance(ship.position, me.shipyard.position) <= 20:
                 move = game_map.naive_navigate(ship, me.shipyard.position)
-                
+
                 # track ship dropoffs to tweak strategy
                 if ship.position.directional_offset(move) == me.shipyard.position:
                     ship_tally[ship.id] += ship.halite_amount
                     logging.info("Ship {} dropoff: born turn {}.".format(ship.id, ship_birth[ship.id]))
                     logging.info("dropped off {}, had {}, total {}".format(ship.halite_amount, ship_return_amount[ship.id], ship_tally[ship.id]))
                     ship_return_amount[ship.id] = 0
-                
+
                 command_queue.append(ship.move(move))
                 continue
 #            elif me.halite_amount >= constants.DROPOFF_COST:
@@ -73,7 +73,7 @@ while True:
         elif ship.halite_amount >= constants.MAX_HALITE / 2:
             ship_return_amount[ship.id] = ship.halite_amount
             ship_status[ship.id] = RETURNING
-        
+
         # exploring ships: move if square is empty enough (cheap enough to move)
         if game_map[ship.position].halite_amount < 50 and ship.halite_amount >= 10 * game_map[ship.position].halite_amount:
             directions = Direction.get_all_cardinals()
@@ -87,7 +87,7 @@ while True:
                     best_dir = dir
                     best_pos = new_pos
                     best_amt = game_map[new_pos].halite_amount
-            
+
             if best_dir == Direction.Still:
                 game_map[ship.position].mark_unsafe(ship)
                 command_queue.append(ship.stay_still())
@@ -97,7 +97,7 @@ while True:
         else:
             game_map[ship.position].mark_unsafe(ship)
             command_queue.append(ship.stay_still())
-        
+
 
     # If you're on the first turn and have enough halite, spawn a ship.
     # Don't spawn a ship if you currently have a ship at port, though.
@@ -106,4 +106,3 @@ while True:
 
     # Send your moves back to the game environment, ending this turn.
     game.end_turn(command_queue)
-

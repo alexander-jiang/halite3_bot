@@ -1,4 +1,5 @@
 import math
+import random
 import queue
 
 from . import constants
@@ -166,39 +167,63 @@ class GameMap:
 
         return Direction.Still
 
+    def random_naive_navigate(self, ship, destination):
+        """
+        Returns a singular safe move towards the destination.
+
+        :param ship: The ship to move.
+        :param destination: Ending position
+        :return: A direction.
+        """
+        # No need to normalize destination, since get_unsafe_moves
+        # does that
+        directions = self.get_unsafe_moves(ship.position, destination)
+        random.shuffle(directions)
+        for direction in directions:
+            target_pos = ship.position.directional_offset(direction)
+            if not self[target_pos].is_occupied:
+                self[target_pos].mark_unsafe(ship)
+                return direction
+
+        return Direction.Still
+
     def cost_navigate(self, ship, destination):
         source = self.normalize(ship.position)
         destination = self.normalize(destination)
+        if source == destination:
+            return Direction.Still
 
         # Use UCS search to find cheapest path to destination
         frontier = util.PriorityQueue()
         predecessors = {}
         visited_pos = set([])
         frontier.update(source, 0)
+        nav_directions = []
 
         while not frontier.empty():
             pos, g_cost = frontier.pop_min()
             visited_pos.add(pos)
 
             if pos == destination:
-                directions = []
                 curr_pos = destination
                 while curr_pos != source:
                     dir, curr_pos = predecessors[curr_pos]
-                    directions.insert(0, dir)
+                    nav_directions.insert(0, dir)
+                break
 
-            move_cost = math.floor(game_map[pos].halite_amount * 0.1)
+            move_cost = math.floor(self[pos].halite_amount * 0.1)
             dirs = Direction.get_all_cardinals()
             for dir in dirs:
-                new_pos = positionals.directional_offset(dir)
-                if new_pos not in visited and frontier.update(new_pos, g_cost + move_cost):
+                new_pos = pos.directional_offset(dir)
+                if new_pos not in visited_pos and frontier.update(new_pos, g_cost + move_cost):
                     predecessors[new_pos] = (dir, pos)
 
-        best_dir = directions[0]
-        target_pos = positionals.directional_offset(best_dir)
+        best_dir = nav_directions[0]
+        target_pos = source.directional_offset(best_dir)
         if not self[target_pos].is_occupied:
             self[target_pos].mark_unsafe(ship)
             return best_dir
+        self[source].mark_unsafe(ship)
         return Direction.Still
 
     @staticmethod
