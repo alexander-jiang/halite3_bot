@@ -50,6 +50,7 @@ while True:
     if (game.turn_number < 300 and
         me.halite_amount >= constants.SHIP_COST and
         not game_map[me.shipyard].is_occupied and shipyard_escape_sq > 0):
+            # logging.info("spawning a new ship")
             command_queue.append(game.me.shipyard.spawn())
             spawned_ships += 1
 
@@ -112,12 +113,12 @@ while True:
         # 4. Update statistics
 
         if direction == Direction.Still:
-            ship_stats[ship.id].halite_collected += int(game_map[ship.position].halite_amount * 0.25)
+            ship_stats[ship.id].halite_collected += gain_of_stay
         else:
             ship_stats[ship.id].distance_traveled += 1
         # TODO check if at a dropoff
         if ship.position.directional_offset(direction) == me.shipyard.position:
-            ship_stats[ship.id].halite_delivered += ship.halite_amount
+            ship_stats[ship.id].halite_delivered += ship.halite_amount - cost_of_move
 
         command_queue.append(ship.move(direction))
 
