@@ -71,6 +71,17 @@ potentially unoccupied, unless another ship marked it as unsafe already)
   - for fun but also could help evaluate bots and debug issues
 
 ## Notes
+### 12/16/2018
+- Still polishing up bot v4: it wins against v3.1 but not by as much as I would've expected...
+  - ship recall is more consistent
+  - targeting is slightly improved
+  - still missing "inspire" mechanic and not utilizing dropoffs
+  - investigating a dynamic return threshold (not just varying based on the turn number
+  but also by the ship's distance from shipyard)
+  - also investigating a "defensive" navigation system to be used when returning to base
+  with large amounts of halite (avoiding collisions with enemies while in enemy territory
+  should boost efficiency and overall performance)
+
 ### 12/15/2018
 - Submitted bot v3.1 as the submission v4: v3.1 includes some small updates to v3:
     - rework the states: first decide what state the ship is before deciding
