@@ -126,6 +126,21 @@ class GameMap:
         return (Direction.South if target.y > source.y else Direction.North if target.y < source.y else None,
                 Direction.East if target.x > source.x else Direction.West if target.x < source.x else None)
 
+    def mark_unsafe_move(self, ship, dir):
+        """
+        Similar to mark_unsafe, but takes a ship and the ship's direction and
+        marks the destination square as unsafe (and also clears the square the
+        ship left from if it wasn't already marked as unsafe by another ship).
+        """
+        if dir == Direction.Still:
+            self[ship.position].mark_unsafe(ship)
+        else:
+            new_pos = ship.position.directional_offset(dir)
+            self[new_pos].mark_unsafe(ship)
+            # if ship is going to move, free up the square that the ship just left
+            if self[ship.position].ship is not None and self[ship.position].ship == ship:
+                self[ship.position].ship = None
+
     def get_unsafe_moves(self, source, destination):
         """
         Return the Direction(s) to move closer to the target point, or empty if the points are the same.
@@ -167,9 +182,10 @@ class GameMap:
 
         return Direction.Still
 
-    def random_naive_navigate(self, ship, destination):
+    def random_naive_navigate(self, ship, destination, allow_any=False):
         """
-        Returns a singular safe move towards the destination.
+        Same as naive_navigate, but considers the potential directions in a
+        random order.
 
         :param ship: The ship to move.
         :param destination: Ending position
@@ -178,6 +194,8 @@ class GameMap:
         # No need to normalize destination, since get_unsafe_moves
         # does that
         directions = self.get_unsafe_moves(ship.position, destination)
+        if allow_any:
+            directions = Direction.get_all_cardinals()
         random.shuffle(directions)
         for direction in directions:
             target_pos = ship.position.directional_offset(direction)

@@ -3,7 +3,7 @@ import itertools
 
 class PriorityQueue():
     def __init__(self):
-        self.REMOVED = -1                    # updated nodes' old triples in the queue are given this priority
+        self.REMOVED = -float('inf')         # updated nodes' old triples in the queue are given this priority
         self.pq = []                         # triples (priority, count, node)
         self.node_priority = {}              # mapping nodes to priority
         self.counter = itertools.count()     # tiebreaker: unique increasing ID
@@ -37,5 +37,19 @@ class PriorityQueue():
             return node, priority
         return None, None
 
+    def nsmallest(self, n):
+        # returns list of N (node, priority) tuples sorted in ascending order of priority
+        smallest = []
+        i = 0
+        while i < len(self.pq) and len(smallest) < n:
+            priority, _id, node = self.pq[i]
+            if self.node_priority[node] != self.REMOVED:
+                smallest.append((node, priority))
+            i += 1
+        return smallest
+
     def empty(self):
         return len(self.pq) == 0
+
+    def __len__(self):
+        return len(self.pq)

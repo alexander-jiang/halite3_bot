@@ -99,7 +99,7 @@ while True:
                         game_map[me.shipyard.position].ship = None
 
                 # if ship is going to move, free up the square that the ship just left
-                if move != Direction.Still and game_map[ship.position].ship == ship:
+                if move != Direction.Still and game_map[ship.position].ship is not None and game_map[ship.position].ship == ship:
                     game_map[ship.position].ship = None
                 command_queue.append(ship.move(move))
         else:

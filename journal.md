@@ -6,7 +6,12 @@ destination correctly
 - Added random_naive_navigate, which is the same as naive_navigate but tries the
 directions in a random order, and cost_navigate, which uses UCS to try to find
 the cheapest route to the destination (prone to softlocking, see below)
-
+  - Added a keyword arg: allow_any, which allows any direction to be chosen, regardless
+  of whether it moves closer to the target
+- Added a PriorityQueue implementation in hlt/util.py
+- Added a mark_unsafe_move to the GameMap class: allows you to mark cells unsafe
+for a ship's move (accounts for the fact that the ship's original square is
+potentially unoccupied, unless another ship marked it as unsafe already)
 
 ## To-do/Ideas
 - Navigation
@@ -15,31 +20,57 @@ the cheapest route to the destination (prone to softlocking, see below)
     - Unfortunately often results in softlocking. It seems that a simpler approach
     (just move directly towards target with collision avoidance) prevails.
   - Collision avoidance/investigation:
-    - Why does v3_1 collide but v3 doesn't? Particularly since v4 is based off of
+    - ~~Why does v3.1 collide but v3 doesn't? Particularly since v4 is based off of
     a similar pipeline of components (state transition, then movement based on
-    state), I should figure out why v3_1 collides so much more frequently.
-    - How come v4 sometimes collides when ship spawns?
+    state), I should figure out why v3.1 collides so much more frequently.~~
+    - ~~How come v4 sometimes collides when ship spawns?~~ If you decide whether to spawn
+    before ship navigation, you need to mark the shipyard as unsafe.
+    - How to avoid collisions with enemy ships?
   - Softlock avoidance:
-    - add a random "wiggle" if ship was stationary for several turns? (what if
-    the ship wanted to stay still vs. wanted to move but didn't because of collision?)
+    - ~~Store each ship's planned move and whether it tried to move: if it did try
+    and was blocked, try again but check if any friendly ships are blocking it.
+    If so, and the neighboring friendly ship wants to move as well, try switching
+    the ship's positions.~~
+      - Still need to handle the case when softlocked with an enemy ship.
   - Reworking pipeline:
-    - Assign targets to all ships, then plan movements for all ships? (i.e. two
+    - ~~Assign targets to all ships, then plan movements for all ships (i.e. two
     separate for loops). Could implement collision avoidance algorithms from
-    Kavraki's robotics class.
+    Kavraki's robotics class.~~ Collision avoidance algorithms are probably overkill;
+    besides, in this world, ships can phase through each other (collisions are only
+    checked in discrete time anyways)
 - Target selection/Exploration:
   - v4 does this poorly: it will turn away from high-halite squares even if the
   ship is right next to them! On the other hand, v3's randomness is inefficient
   as the round progresses.
+  - in early game, assigning targets to closest ship in decreasing halite amount
+  chooses targets for ships that are far away (maybe should weight distance based
+  on halite density in the board, which could also help determine ship spawning decisions)
 - Tactical Optimizations:
-    - Recall all ships at end of round (colliding ships on your own shipyard deposits the halite)
-    - Don't fail when an enemy ship occupies the shipyard (just collide with it and take its halite)
+  - ~~Recall all ships at end of round (colliding ships on your own shipyard deposits the halite)~~
+    - need to bugfix this: sometimes ships get left over when they don't have enough halite to move
+    or to avoid collisions (in both v3.1 and v4)
+  - Force first five actions to be spawning ships (and thus need to force ships to move in first 5 turns
+  so that shipyard isn't occupied)
+  - Spawning too many ships in the mid-game.
+  - Don't fail when an enemy ship occupies the shipyard (just collide with it and take its halite)
 - Building dropoffs:
-    - what are the benefits of building the dropoff?
-    - how quickly is the cost recovered over time?
+  - benefits of building the dropoff: instantly collects when there's a lot of halite
+  and ships don't have enough capacity. Also lets you explore further (don't have
+  to stay as long to collect because you won't have to travel as far) and adds
+  another dropoff option to avoid overcrowding the shipyard.
+  - how quickly is the cost recovered over time?
 - Visualization of ship statistics:
-    - for fun but also could help evaluate bots and debug issues
+  - for fun but also could help evaluate bots and debug issues
 
 ## Notes
+### 12/15/2018
+- Submitted bot v3.1 as the submission v4: v3.1 includes some small updates to v3:
+    - rework the states: first decide what state the ship is before deciding
+    movement
+    - recalling ships at the end of the round (imperfect as sometimes ships are
+    forced to stop because they don't have enough halite to move), allowing
+    collisions on friendly shipyard
+
 ### 12/13/2018
 - Downloaded starter kit for Python and worked with the basics in the web editor
 to produce a v3 bot.
