@@ -49,7 +49,8 @@ most some Manhattan distance away from the specified position
     - **dynamic returning threshold?** return threshold should be higher when further
     from shipyard (capture as much as possible), and lower in early-game
     - alternatively, a way to reassign targets if the new target is **both close and has
-    much more halite than the current target**
+    much more halite than the current target** (need to be careful to avoid thrashing
+    between equivalent targets, as the board is symmetrical)
   - in early game, assigning targets to closest ship in decreasing halite amount
   chooses targets for ships that are far away (maybe should weight distance based
   on halite density in the board, which could also help determine ship spawning decisions)
@@ -80,15 +81,25 @@ most some Manhattan distance away from the specified position
 
 ## Notes
 ### 12/16/2018
-- Still polishing up bot v4: it wins against v3.1 but not by as much as I would've expected...
+- Submitted bot v4: it wins against v3.1 pretty consistently, though it wins
+by a larger margin when the halite density isn't high around the shipyards (i.e.
+in layouts where v3.1 struggles)
   - ship recall is more consistent
   - targeting is slightly improved
-  - still missing "inspire" mechanic and not utilizing dropoffs
-  - investigating a dynamic return threshold (not just varying based on the turn number
+  - better able to escape softlock with friendly and enemy ships
+  - added "inspire" mechanic
+  - added more sophisticated ship-spawn decision: track the breakeven ages of
+  ships to see when to stop spawning (but spawns are always allowed for first 5
+  ships and first 100 turns)
+  - shouldn't be susceptible to an enemy ship on the shipyard
+  - not using a dynamic return threshold (not just varying based on the turn number
   but also by the ship's distance from shipyard)
-  - also investigating a "defensive" navigation system to be used when returning to base
+  - not using any retargeting (e.g. if a collision happens nearby, the ship won't
+  retarget)
+  - not using a "defensive" navigation system to be used when returning to base
   with large amounts of halite (avoiding collisions with enemies while in enemy territory
   should boost efficiency and overall performance)
+  - not utilizing dropoffs
 - There's an interesting board seed: 1545020736. It doesn't have much halite (around 102k)
 so you need to make use of the inspire mechanic and also limit ship production. Could be an
 interesting test case to see if the ship spawning is tuned well (and also could be used to test
