@@ -13,6 +13,8 @@ the cheapest route to the destination (prone to softlocking, see below)
 for a ship's move (accounts for the fact that the ship's original square is
 potentially unoccupied, unless another ship marked it as unsafe already)
   - Use mark_unsafe_move in random_naive_navigate instead of mark_unsafe
+- Added get_within_radius to hlt/positionals.py to get all positions that are at
+most some Manhattan distance away from the specified position
 
 ## To-do/Ideas
 - Navigation
@@ -44,8 +46,10 @@ potentially unoccupied, unless another ship marked it as unsafe already)
   - v4 does this poorly: it will turn away from high-halite squares even if the
   ship is right next to them! On the other hand, v3's randomness is inefficient
   as the round progresses.
-    - dynamic returning threshold? return threshold should be higher when further
+    - **dynamic returning threshold?** return threshold should be higher when further
     from shipyard (capture as much as possible), and lower in early-game
+    - alternatively, a way to reassign targets if the new target is **both close and has
+    much more halite than the current target**
   - in early game, assigning targets to closest ship in decreasing halite amount
   chooses targets for ships that are far away (maybe should weight distance based
   on halite density in the board, which could also help determine ship spawning decisions)
@@ -55,9 +59,13 @@ potentially unoccupied, unless another ship marked it as unsafe already)
     or to avoid collisions (in both v3.1 and v4)~~ v4 bot seems to have this issue fixed
   - Force first five actions to be spawning ships (and thus need to force ships to move in first 5 turns
   so that shipyard isn't occupied)
-  - When returning to dropoff, try to avoid enemy ships
+    - maybe extend this to say that the move off of the shipyard should be randomized to
+    push the bots towards different regions in the map
+  - When returning to dropoff, try to avoid enemy ships ("defensive" navigation)
   - Spawning too many ships in the mid-game? (some visualization of ship statistics would help, see below)
-  - Don't fail when an enemy ship occupies the shipyard (just collide with it and take its halite)
+    - In bot v4, spawns are limited when the ships take longer to breakeven (though the first five spawns
+    are always allowed, and spawns in the first 100 turns are also not limited)
+  - ~~Don't fail when an enemy ship occupies the shipyard (just collide with it and take its halite)~~
 - Building dropoffs:
   - benefits of building the dropoff: instantly collects when there's a lot of halite
   and ships don't have enough capacity. Also lets you explore further (don't have
@@ -81,6 +89,11 @@ potentially unoccupied, unless another ship marked it as unsafe already)
   - also investigating a "defensive" navigation system to be used when returning to base
   with large amounts of halite (avoiding collisions with enemies while in enemy territory
   should boost efficiency and overall performance)
+- There's an interesting board seed: 1545020736. It doesn't have much halite (around 102k)
+so you need to make use of the inspire mechanic and also limit ship production. Could be an
+interesting test case to see if the ship spawning is tuned well (and also could be used to test
+a "hit and run" strategy where you intentionally collide with enemy ships and collect the
+combined resources)
 
 ### 12/15/2018
 - Submitted bot v3.1 as the submission v4: v3.1 includes some small updates to v3:

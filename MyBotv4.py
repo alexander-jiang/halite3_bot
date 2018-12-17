@@ -30,6 +30,8 @@ ship_targets = {} # maps ship IDs to their target destinations.
 ship_blockers = {} # maps ship IDs to ship ID(s) that are blocking them.
 ship_stats = {} # maps ship IDs to ShipStats object (see above)
 RECALL_MODE = False # whether to force ships to return to base and allow friendly ship collisions on shipyard/dropoffs
+breakeven_age = constants.MAX_TURNS # minimum number of turns it took for a ship to breakeven (helps determine when to stop spawning)
+min_num_ships = 5
 # end SETUP, start game
 
 game.ready("ModularTargetingSwarm_v1")
@@ -59,13 +61,19 @@ while True:
                 target_pos.update(pos, -game_map[pos].halite_amount)
 
     # 1. Spawn decision (based on turn #, total # of turns, efficiency, "crowdedness" of shipyard and surrounding squares)
+    for ship in me.get_ships():
+        if ship.id not in ship_targets:
+            ship_targets[ship.id] = me.shipyard.position
+        if ship.id not in ship_stats:
+            ship_stats[ship.id] = ShipStats(game.turn_number - 1, 0, 0, 0)
+
+    end_game_duration = breakeven_age * 1.1 # extra moves because board is emptier
     shipyard_escape_sq = 0
     for nbr_pos in me.shipyard.position.get_surrounding_cardinals():
         if not game_map[nbr_pos].is_occupied:
             shipyard_escape_sq += 1
-    if (game.turn_number < constants.MAX_TURNS - 100 and not RECALL_MODE and
-        len(target_pos) > len(me.get_ships()) and
-        me.halite_amount >= constants.SHIP_COST and
+    if ((len(me.get_ships()) < min_num_ships or game.turn_number <= 100 or game.turn_number < constants.MAX_TURNS - end_game_duration) and
+        not RECALL_MODE and me.halite_amount >= constants.SHIP_COST and
         not game_map[me.shipyard].is_occupied and shipyard_escape_sq > 0):
             # logging.info("spawning a new ship")
             placeholder_ship = hlt.entity.Ship(me.id, next_ship_id, me.shipyard.position, 0)
@@ -79,7 +87,7 @@ while True:
     target_halite_threshold = constants.MAX_HALITE * 0.1
     # once collected enough, return the ship to base
     ### TODO FIRST ****
-    ### dynamic return threshold: based on distance from shipyard, nearby halite, etc.
+    ### dynamic return threshold: based on distance from shipyard, nearby halite, number of ships, game turn number, etc.
     return_threshold = constants.MAX_HALITE * min(0.9, 0.2 + game.turn_number / 200.0)
     logging.info("return threshold = {}".format(return_threshold))
 
@@ -92,21 +100,15 @@ while True:
     # Which ships should be retargeted (aren't returning to base or being recalled)
     retarget_ships = [] # list of ship IDs to retarget
     for ship in me.get_ships():
-        if ship.id not in ship_targets:
-            ship_targets[ship.id] = me.shipyard.position
-        if ship.id not in ship_stats:
-            ship_stats[ship.id] = ShipStats(game.turn_number - 1, 0, 0, 0)
-
-        # logging.info("Ship {}: age={}, current={}, collected={}, delivered={}, distance={}".format(
-        #     ship.id, game.turn_number - ship_stats[ship.id].turn_of_birth, ship.halite_amount,
-        #     ship_stats[ship.id].halite_collected, ship_stats[ship.id].halite_delivered, ship_stats[ship.id].distance_traveled))
+        logging.info("Ship {}: age={}, delivered={}".format(
+            ship.id, game.turn_number - ship_stats[ship.id].turn_of_birth,
+            ship_stats[ship.id].halite_delivered))
 
         if RECALL_MODE or ship.halite_amount >= return_threshold:
             # TODO retarget to nearest dropoff? maybe even favor a dropoff since shipyard may spawn ships?
             ship_targets[ship.id] = me.shipyard.position
         elif ship.position == ship_targets[ship.id]:
-            ### *************
-            ### ************* TODO FIRST  *************
+            ### TODO *************
             ### maybe allow target to refresh every round (for ships not heading
             ### to shipyard/dropoff only? or for all) in case of collisions suddenly
             ### changing the ideal target?
@@ -141,41 +143,55 @@ while True:
             retarget_ships.pop(closest_ship_idx)
             ship_targets[closest_ship.id] = next_target_pos
 
+    # Override: if enemy ship is on shipyard, ignore it for collision purposes
+    # TODO also consider dropoffs
+    if game_map[me.shipyard.position].is_occupied and game_map[me.shipyard.position].ship.owner != me.id:
+        game_map[me.shipyard.position].ship = None
+
     # 3. Movement behavior (execute movement towards target, maybe with certain amount of randomness or "impatience")
     planned_moves = {}
     for ship in me.get_ships():
         if RECALL_MODE:
-            # TODO retarget to nearest dropoff? maybe even favor a dropoff since shipyard may spawn ships?
+            # TODO retarget to nearest dropoff?
             ship_targets[ship.id] = me.shipyard.position
             game_map[me.shipyard.position].ship = None
 
         ship_target = ship_targets[ship.id]
         cost_to_move = game_map[ship.position].halite_amount // constants.MOVE_COST_RATIO
         gain_of_stay = game_map[ship.position].halite_amount // constants.EXTRACT_RATIO
+        inspired = False
+        if constants.INSPIRATION_ENABLED:
+            opp_ship_count = 0
+            for near_pos in ship.position.get_within_radius(constants.INSPIRATION_RADIUS):
+                if game_map[near_pos].is_occupied and game_map[near_pos].ship.owner != me.id:
+                    opp_ship_count += 1
+            if opp_ship_count >= constants.INSPIRATION_SHIP_COUNT:
+                inspired = True
+                cost_to_move = game_map[ship.position].halite_amount // constants.INSPIRED_MOVE_COST_RATIO
+                gain_of_stay = (game_map[ship.position].halite_amount // constants.INSPIRED_EXTRACT_RATIO) * constants.INSPIRED_BONUS_MULTIPLIER
+
         logging.info("Ship {}: {}, target={}".format(ship.id, ship.position, ship_target))
 
-        ## TODO add override for collisions with enemy ship on friendly shipyard/dropoff
         ### *******
         ### TODO FIRST add "defensive" movement when returning to base or surrounded by enemies?
         ### *******
         tried_to_move = False
         if ship.halite_amount < cost_to_move or ship_target == ship.position:
             move_dir = Direction.Still # forced to take this action
-        elif ship.halite_amount + gain_of_stay <= constants.MAX_HALITE and not RECALL_MODE:
-            ## TODO what about inspire? should probably just collect if there's a lot to get (even if you don't have capacity to store it all?)
-            # ship has capacity to collect for at least one turn
-            patience = gain_of_stay / max(1.0, ship.halite_amount * 0.25)
+        elif RECALL_MODE or ship.halite_amount == constants.MAX_HALITE:
+            # ship doesn't have time or capacity to collect
+            # move_dir = game_map.cost_navigate(ship, ship_target)
+            move_dir = game_map.random_naive_navigate(ship, ship_target)
+            tried_to_move = True
+        else:
+            # ship can collect or move. Decide based on how much there is to be gained
+            patience = gain_of_stay / max(10.0, ship.halite_amount * 0.25)
             if random.random() < patience:
                 move_dir = Direction.Still
             else:
                 # move_dir = game_map.cost_navigate(ship, ship_target)
                 move_dir = game_map.random_naive_navigate(ship, ship_target)
                 tried_to_move = True
-        else:
-            # ship doesn't have capacity to stay and collect, should just move.
-            # move_dir = game_map.cost_navigate(ship, ship_target)
-            move_dir = game_map.random_naive_navigate(ship, ship_target)
-            tried_to_move = True
         planned_moves[ship.id] = (move_dir, tried_to_move)
 
     # 4. Softlock detection/resolution
@@ -217,14 +233,8 @@ while True:
 
                 if success: break
 
+            # If blocked by enemy ship(s), try a different direction that is safe from all enemy moves
             if opponent_adjacent:
-                # TODO what to do if blocked by enemy ships?
-                ### *************
-                ### ************* TODO FIRST  *************
-                ### figure out how to avoid softlock. give priority to returning ships?
-                ### add a random "wiggle" after several turns of being unable to move (despite trying to?)
-                ### have each ship signal when it's stuck and where it's trying to move. if this ship
-                ### detects that it's blocking another ship, have it wiggle with some probability
                 for dir in Direction.get_all_cardinals():
                     nbr_pos = ship.position.directional_offset(dir)
                     if not game_map[nbr_pos].is_occupied:
@@ -254,8 +264,14 @@ while True:
 
         # TODO check if at a dropoff
         if ship.position.directional_offset(move_dir) == me.shipyard.position:
+            not_yet_breakeven = ship_stats[ship.id].halite_delivered < constants.SHIP_COST
             ship_stats[ship.id].halite_delivered += ship.halite_amount - cost_to_move
             total_halite_collected += ship.halite_amount - cost_to_move
+
+            ship_age = game.turn_number - ship_stats[ship.id].turn_of_birth
+            if not_yet_breakeven and ship_stats[ship.id].halite_delivered >= constants.SHIP_COST:
+                logging.info("most recent breakeven age is now {} from ship {}".format(ship_age, ship.id))
+                breakeven_age = ship_age
 
 
     # Send your moves back to the game environment, ending this turn.

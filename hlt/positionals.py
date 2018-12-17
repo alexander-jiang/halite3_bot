@@ -88,6 +88,16 @@ class Position:
         """
         return [self.directional_offset(current_direction) for current_direction in Direction.get_all_cardinals()]
 
+    def get_within_radius(self, radius):
+        """Returns all positions that are at most a specified Manhattan distance away."""
+        positions = []
+        for new_x in range(self.x - radius, self.x + radius + 1):
+            x_diff = abs(self.x - new_x)
+            max_y_diff = radius - x_diff
+            for new_y in range(self.y - max_y_diff, self.y + max_y_diff + 1):
+                positions.append(Position(new_x, new_y))
+        return positions
+
     def __add__(self, other):
         return Position(self.x + other.x, self.y + other.y)
 
