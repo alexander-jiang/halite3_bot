@@ -12,6 +12,7 @@ the cheapest route to the destination (prone to softlocking, see below)
 - Added a mark_unsafe_move to the GameMap class: allows you to mark cells unsafe
 for a ship's move (accounts for the fact that the ship's original square is
 potentially unoccupied, unless another ship marked it as unsafe already)
+  - Use mark_unsafe_move in random_naive_navigate instead of mark_unsafe
 
 ## To-do/Ideas
 - Navigation
@@ -25,13 +26,14 @@ potentially unoccupied, unless another ship marked it as unsafe already)
     state), I should figure out why v3.1 collides so much more frequently.~~
     - ~~How come v4 sometimes collides when ship spawns?~~ If you decide whether to spawn
     before ship navigation, you need to mark the shipyard as unsafe.
-    - How to avoid collisions with enemy ships?
+    - ~~How to avoid collisions with enemy ships?~~ Can only guarantee by keeping your distance
+    (could be a useful strategy when returning with a large amount of halite)
   - Softlock avoidance:
     - ~~Store each ship's planned move and whether it tried to move: if it did try
     and was blocked, try again but check if any friendly ships are blocking it.
     If so, and the neighboring friendly ship wants to move as well, try switching
     the ship's positions.~~
-      - Still need to handle the case when softlocked with an enemy ship.
+      - ~~Still need to handle the case when softlocked with an enemy ship.~~
   - Reworking pipeline:
     - ~~Assign targets to all ships, then plan movements for all ships (i.e. two
     separate for loops). Could implement collision avoidance algorithms from
@@ -42,16 +44,19 @@ potentially unoccupied, unless another ship marked it as unsafe already)
   - v4 does this poorly: it will turn away from high-halite squares even if the
   ship is right next to them! On the other hand, v3's randomness is inefficient
   as the round progresses.
+    - dynamic returning threshold? return threshold should be higher when further
+    from shipyard (capture as much as possible), and lower in early-game
   - in early game, assigning targets to closest ship in decreasing halite amount
   chooses targets for ships that are far away (maybe should weight distance based
   on halite density in the board, which could also help determine ship spawning decisions)
 - Tactical Optimizations:
   - ~~Recall all ships at end of round (colliding ships on your own shipyard deposits the halite)~~
-    - need to bugfix this: sometimes ships get left over when they don't have enough halite to move
-    or to avoid collisions (in both v3.1 and v4)
+    - ~~need to bugfix this: sometimes ships get left over when they don't have enough halite to move
+    or to avoid collisions (in both v3.1 and v4)~~ v4 bot seems to have this issue fixed
   - Force first five actions to be spawning ships (and thus need to force ships to move in first 5 turns
   so that shipyard isn't occupied)
-  - Spawning too many ships in the mid-game.
+  - When returning to dropoff, try to avoid enemy ships
+  - Spawning too many ships in the mid-game? (some visualization of ship statistics would help, see below)
   - Don't fail when an enemy ship occupies the shipyard (just collide with it and take its halite)
 - Building dropoffs:
   - benefits of building the dropoff: instantly collects when there's a lot of halite
@@ -60,6 +65,9 @@ potentially unoccupied, unless another ship marked it as unsafe already)
   another dropoff option to avoid overcrowding the shipyard.
   - how quickly is the cost recovered over time?
 - Visualization of ship statistics:
+  - Still need to account for inspired halite collection to have accurate stats
+  - Can use these to determine when to stop spawning ships (i.e. how many turns does
+  it take for a ship to dropoff >1k halite?)
   - for fun but also could help evaluate bots and debug issues
 
 ## Notes

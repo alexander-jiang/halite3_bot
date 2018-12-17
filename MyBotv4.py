@@ -7,7 +7,6 @@ from hlt import positionals
 from hlt import util
 from hlt.positionals import Direction, Position
 
-import heapq
 import random
 import logging
 
@@ -56,7 +55,7 @@ while True:
         for y in range(game_map.height):
             pos = Position(x, y)
             if pos not in ship_targets.values():
-                # heap sorts in ascending order, so we negate the halite amount to get descending sort
+                # negate the halite amount to get descending sort
                 target_pos.update(pos, -game_map[pos].halite_amount)
 
     # 1. Spawn decision (based on turn #, total # of turns, efficiency, "crowdedness" of shipyard and surrounding squares)
@@ -79,15 +78,16 @@ while True:
     # only stay on targets with at least this much halite
     target_halite_threshold = constants.MAX_HALITE * 0.1
     # once collected enough, return the ship to base
-    # TODO what if there's a lot more nearby? shouldn't leave without collecting it
+    ### TODO FIRST ****
+    ### dynamic return threshold: based on distance from shipyard, nearby halite, etc.
     return_threshold = constants.MAX_HALITE * min(0.9, 0.2 + game.turn_number / 200.0)
     logging.info("return threshold = {}".format(return_threshold))
 
-    top_k = 10
-    logging.info("Top {} target cells (of {}):".format(top_k, len(target_pos)))
-    top_k_most_halite = target_pos.nsmallest(top_k)
-    for pos, neg_amt in top_k_most_halite:
-        logging.info("{}".format(game_map[pos]))
+    # top_k = 10
+    # logging.info("Top {} target cells (of {}):".format(top_k, len(target_pos)))
+    # top_k_most_halite = target_pos.nsmallest(top_k)
+    # for pos, neg_amt in top_k_most_halite:
+    #     logging.info("{}".format(game_map[pos]))
 
     # Which ships should be retargeted (aren't returning to base or being recalled)
     retarget_ships = [] # list of ship IDs to retarget
@@ -97,9 +97,9 @@ while True:
         if ship.id not in ship_stats:
             ship_stats[ship.id] = ShipStats(game.turn_number - 1, 0, 0, 0)
 
-        logging.info("Ship {}: age={}, current={}, collected={}, delivered={}, distance={}".format(
-            ship.id, game.turn_number - ship_stats[ship.id].turn_of_birth, ship.halite_amount,
-            ship_stats[ship.id].halite_collected, ship_stats[ship.id].halite_delivered, ship_stats[ship.id].distance_traveled))
+        # logging.info("Ship {}: age={}, current={}, collected={}, delivered={}, distance={}".format(
+        #     ship.id, game.turn_number - ship_stats[ship.id].turn_of_birth, ship.halite_amount,
+        #     ship_stats[ship.id].halite_collected, ship_stats[ship.id].halite_delivered, ship_stats[ship.id].distance_traveled))
 
         if RECALL_MODE or ship.halite_amount >= return_threshold:
             # TODO retarget to nearest dropoff? maybe even favor a dropoff since shipyard may spawn ships?
@@ -117,42 +117,52 @@ while True:
                 retarget_ships.append(ship)
 
         # TODO check distance to nearest dropoff
-        if constants.MAX_TURNS - game.turn_number <= game_map.calculate_distance(ship.position, me.shipyard.position):
+        return_dist = game_map.calculate_distance(ship.position, me.shipyard.position)
+        if constants.MAX_TURNS - game.turn_number <= return_dist:
+            # logging.info(
+            #     "RECALL_MODE activated by ship {} distance {}"
+            #     "from shipyard with {} turns left".format(
+            #         ship.id, return_dist, constants.MAX_TURNS - game.turn_number))
             RECALL_MODE = True
 
-    # Give target to the closest ship
-    ### TODO maybe give multiple ships the same target if there's a lot of halite there and current ship can't store it all?
-    while len(retarget_ships) > 0 and len(target_pos) > 0:
-        next_target_pos, _neg_amt = target_pos.pop_min()
-        min_dist = float('inf')
-        closest_ship_idx = -1
-        for idx in range(len(retarget_ships)):
-            ship = retarget_ships[idx]
-            if game_map.calculate_distance(ship.position, next_target_pos) < min_dist:
-                min_dist = game_map.calculate_distance(ship.position, next_target_pos)
-                closest_ship_idx = idx
-        closest_ship = retarget_ships[closest_ship_idx]
-        retarget_ships.pop(closest_ship_idx)
-        ship_targets[closest_ship.id] = next_target_pos
+    if not RECALL_MODE:
+        # Give target to the closest ship
+        ### TODO maybe give multiple ships the same target if there's a lot of halite there and current ship can't store it all?
+        while len(retarget_ships) > 0 and len(target_pos) > 0:
+            next_target_pos, _neg_amt = target_pos.pop_min()
+            min_dist = float('inf')
+            closest_ship_idx = -1
+            for idx in range(len(retarget_ships)):
+                ship = retarget_ships[idx]
+                if game_map.calculate_distance(ship.position, next_target_pos) < min_dist:
+                    min_dist = game_map.calculate_distance(ship.position, next_target_pos)
+                    closest_ship_idx = idx
+            closest_ship = retarget_ships[closest_ship_idx]
+            retarget_ships.pop(closest_ship_idx)
+            ship_targets[closest_ship.id] = next_target_pos
 
     # 3. Movement behavior (execute movement towards target, maybe with certain amount of randomness or "impatience")
     planned_moves = {}
     for ship in me.get_ships():
-        ship_target = ship_targets[ship.id]
         if RECALL_MODE:
             # TODO retarget to nearest dropoff? maybe even favor a dropoff since shipyard may spawn ships?
             ship_targets[ship.id] = me.shipyard.position
             game_map[me.shipyard.position].ship = None
 
+        ship_target = ship_targets[ship.id]
         cost_to_move = game_map[ship.position].halite_amount // constants.MOVE_COST_RATIO
         gain_of_stay = game_map[ship.position].halite_amount // constants.EXTRACT_RATIO
         logging.info("Ship {}: {}, target={}".format(ship.id, ship.position, ship_target))
 
         ## TODO add override for collisions with enemy ship on friendly shipyard/dropoff
+        ### *******
+        ### TODO FIRST add "defensive" movement when returning to base or surrounded by enemies?
+        ### *******
         tried_to_move = False
         if ship.halite_amount < cost_to_move or ship_target == ship.position:
             move_dir = Direction.Still # forced to take this action
         elif ship.halite_amount + gain_of_stay <= constants.MAX_HALITE and not RECALL_MODE:
+            ## TODO what about inspire? should probably just collect if there's a lot to get (even if you don't have capacity to store it all?)
             # ship has capacity to collect for at least one turn
             patience = gain_of_stay / max(1.0, ship.halite_amount * 0.25)
             if random.random() < patience:
