@@ -53,9 +53,11 @@ opponent ship adjacent to a given position
     - alternatively, a way to reassign targets if the new target is **both close and has
     much more halite than the current target** (need to be careful to avoid thrashing
     between equivalent targets, as the board is symmetrical)
-  - in early game, assigning targets to closest ship in decreasing halite amount
-  chooses targets for ships that are far away (maybe should weight distance based
-  on halite density in the board, which could also help determine ship spawning decisions)
+  - ~~in early game, assigning targets to closest ship in decreasing halite amount
+  chooses targets for ships that are far away~~
+    - weighting by distance helps
+    - (maybe should weight distance based on halite density in the board, which could
+    also help determine ship spawning decisions)
 - Tactical Optimizations:
   - ~~Recall all ships at end of round (colliding ships on your own shipyard deposits the halite)~~
     - ~~need to bugfix this: sometimes ships get left over when they don't have enough halite to move
@@ -69,10 +71,10 @@ opponent ship adjacent to a given position
     - improved to engage in "evasive" navigation with higher probability if ship is carrying
     more cargo or if the ship has collected most of the square
   - Spawning too many ships in the mid-game? (some visualization of ship statistics would help, see below)
-    - In bot v4, spawns are limited when the ships take longer to breakeven (though the first five spawns
+    - In bot v4 and later, spawns are limited when the ships take longer to breakeven (though the first five spawns
     are always allowed, and spawns in the first 100 turns are also not limited)
   - ~~Don't fail when an enemy ship occupies the shipyard (just collide with it and take its halite)~~
-- Building dropoffs:
+- **Building dropoffs**:
   - benefits of building the dropoff: instantly collects when there's a lot of halite
   and ships don't have enough capacity. Also lets you explore further (don't have
   to stay as long to collect because you won't have to travel as far) and adds
@@ -87,7 +89,7 @@ opponent ship adjacent to a given position
 
 ## Notes
 ### 12/17/2018
-- Working on v4.1:
+- Working on v4.1 (submitted v4.1 as submission 6):
   - evasive movement (avoid enemy if possible, otherwise stay still) when
   returning (probabilistic for all ships, based on the ship's halite amount or
   the halite at ship's position, depending on what the ship's planned move was)
@@ -107,9 +109,9 @@ opponent ship adjacent to a given position
   allowing nearby enemies to grab it)
 
 ### 12/16/2018
-- Submitted bot v4: it wins against v3.1 pretty consistently, though it wins
-by a larger margin when the halite density isn't high around the shipyards (i.e.
-in layouts where v3.1 struggles)
+- Submitted bot v4 as submission 5: it wins against v3.1 pretty consistently,
+though it wins by a larger margin when the halite density isn't high around the
+shipyards (i.e. in layouts where v3.1 struggles)
   - ship recall is more consistent
   - targeting is slightly improved
   - increased max return threshold to 900 halite (from 500 halite in v3.1)
