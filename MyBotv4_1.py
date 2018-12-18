@@ -25,7 +25,6 @@ class ShipStats():
 
 total_halite_collected = 5000 # game starts with 5000 halite per player, this tracks how much halite was collected in total
 spawned_ships = 0
-cardinal_dirs = Direction.get_all_cardinals()
 ship_targets = {} # maps ship IDs to their target destinations.
 ship_blockers = {} # maps ship IDs to ship ID(s) that are blocking them.
 ship_stats = {} # maps ship IDs to ShipStats object (see above)
@@ -51,15 +50,6 @@ while True:
 
     next_ship_id = max([ship.id for ship in me.get_ships()]) + 1 if len(me.get_ships()) > 0 else 1
 
-    # Precompute potential targets (all cells, sorted in descending halite amount)
-    target_pos = util.PriorityQueue()
-    for x in range(game_map.width):
-        for y in range(game_map.height):
-            pos = Position(x, y)
-            if pos not in ship_targets.values():
-                # negate the halite amount to get descending sort
-                target_pos.update(pos, -game_map[pos].halite_amount)
-
     # 1. Spawn decision (based on turn #, total # of turns, efficiency, "crowdedness" of shipyard and surrounding squares)
     for ship in me.get_ships():
         if ship.id not in ship_targets:
@@ -75,7 +65,7 @@ while True:
     if ((len(me.get_ships()) < min_num_ships or game.turn_number <= 100 or game.turn_number < constants.MAX_TURNS - end_game_duration) and
         not RECALL_MODE and me.halite_amount >= constants.SHIP_COST and
         not game_map[me.shipyard].is_occupied and shipyard_escape_sq > 0):
-            # logging.info("spawning a new ship")
+            logging.info("spawning a new ship")
             placeholder_ship = hlt.entity.Ship(me.id, next_ship_id, me.shipyard.position, 0)
             game_map[me.shipyard.position].mark_unsafe(placeholder_ship)
             command_queue.append(game.me.shipyard.spawn())
@@ -91,12 +81,6 @@ while True:
     return_threshold = constants.MAX_HALITE * min(0.9, 0.2 + game.turn_number / 200.0)
     logging.info("return threshold = {}".format(return_threshold))
 
-    # top_k = 10
-    # logging.info("Top {} target cells (of {}):".format(top_k, len(target_pos)))
-    # top_k_most_halite = target_pos.nsmallest(top_k)
-    # for pos, neg_amt in top_k_most_halite:
-    #     logging.info("{}".format(game_map[pos]))
-
     # Which ships should be retargeted (aren't returning to base or being recalled)
     retarget_ships = [] # list of ship IDs to retarget
     for ship in me.get_ships():
@@ -107,6 +91,8 @@ while True:
         if RECALL_MODE or ship.halite_amount >= return_threshold:
             # TODO retarget to nearest dropoff? maybe even favor a dropoff since shipyard may spawn ships?
             ship_targets[ship.id] = me.shipyard.position
+        # else:
+        #     retarget_ships.append(ship)
         elif ship.position == ship_targets[ship.id]:
             ### TODO *************
             ### maybe allow target to refresh every round (for ships not heading
@@ -127,21 +113,36 @@ while True:
             #         ship.id, return_dist, constants.MAX_TURNS - game.turn_number))
             RECALL_MODE = True
 
+    # Per ship, reassign its target based on halite amount and distance
     if not RECALL_MODE:
-        # Give target to the closest ship
-        ### TODO maybe give multiple ships the same target if there's a lot of halite there and current ship can't store it all?
-        while len(retarget_ships) > 0 and len(target_pos) > 0:
-            next_target_pos, _neg_amt = target_pos.pop_min()
-            min_dist = float('inf')
-            closest_ship_idx = -1
-            for idx in range(len(retarget_ships)):
-                ship = retarget_ships[idx]
-                if game_map.calculate_distance(ship.position, next_target_pos) < min_dist:
-                    min_dist = game_map.calculate_distance(ship.position, next_target_pos)
-                    closest_ship_idx = idx
-            closest_ship = retarget_ships[closest_ship_idx]
-            retarget_ships.pop(closest_ship_idx)
-            ship_targets[closest_ship.id] = next_target_pos
+        # Precompute potential targets (all local maxima, sorted in descending halite amount)
+        cells = []
+        for x in range(game_map.width):
+            for y in range(game_map.height):
+                pos = Position(x, y)
+                local_max = True
+                for nbr_pos in pos.get_surrounding_cardinals():
+                    if game_map[nbr_pos].halite_amount > game_map[pos].halite_amount:
+                        local_max = False
+                        break
+                if local_max:
+                    cells.append(game_map[pos])
+        # logging.info("{} local maxima".format(len(cells)))
+        delay_factor = 1.2 # how often will ship have to stop to refuel or to avoid collision?
+        for ship in retarget_ships:
+            def cell_weight_func(cell):
+                return cell.halite_amount / max(1.0, 2.0 * delay_factor * game_map.calculate_distance(ship.position, cell.position))
+            decorated_cells = []
+            for cell in cells:
+                decorated_cells.append((cell_weight_func(cell), cell))
+            target_cells = sorted(decorated_cells, key=lambda pair: pair[0], reverse=True)
+            for target_idx in range(len(target_cells)):
+                weight, cell = target_cells[target_idx]
+                best_target_position = cell.position
+                if best_target_position not in ship_targets.values():
+                    # logging.info("{} targeting {} weight={}".format(ship, cell, cell_weight_func(cell)))
+                    ship_targets[ship.id] = best_target_position
+                    break
 
     # Override: if enemy ship is on shipyard, ignore it for collision purposes
     # TODO also consider dropoffs
@@ -157,6 +158,7 @@ while True:
             game_map[me.shipyard.position].ship = None
 
         ship_target = ship_targets[ship.id]
+        # TODO refactor this cost/gain calculation to avoid duplicated code
         cost_to_move = game_map[ship.position].halite_amount // constants.MOVE_COST_RATIO
         gain_of_stay = game_map[ship.position].halite_amount // constants.EXTRACT_RATIO
         inspired = False
@@ -169,29 +171,80 @@ while True:
                 inspired = True
                 cost_to_move = game_map[ship.position].halite_amount // constants.INSPIRED_MOVE_COST_RATIO
                 gain_of_stay = (game_map[ship.position].halite_amount // constants.INSPIRED_EXTRACT_RATIO) * constants.INSPIRED_BONUS_MULTIPLIER
+        gain_of_stay = min(gain_of_stay, constants.MAX_HALITE - ship.halite_amount)
 
-        logging.info("Ship {}: {}, target={}".format(ship.id, ship.position, ship_target))
+        logging.info("Ship {} at {}, target={}".format(ship.id, ship.position, ship_target))
 
-        ### *******
-        ### TODO FIRST add "defensive" movement when returning to base or surrounded by enemies?
-        ### *******
+        move_dir = Direction.Still
         tried_to_move = False
         if ship.halite_amount < cost_to_move or ship_target == ship.position:
             move_dir = Direction.Still # forced to take this action
-        elif RECALL_MODE or ship.halite_amount == constants.MAX_HALITE:
+            tried_to_move = False
+        elif RECALL_MODE:
             # ship doesn't have time or capacity to collect
-            # move_dir = game_map.cost_navigate(ship, ship_target)
             move_dir = game_map.random_naive_navigate(ship, ship_target)
             tried_to_move = True
         else:
-            # ship can collect or move. Decide based on how much there is to be gained
-            patience = gain_of_stay / max(10.0, ship.halite_amount * 0.25)
-            if random.random() < patience:
-                move_dir = Direction.Still
+            need_to_evade = True
+            # Try to make progress towards target without direct collision or
+            # even risking collision with enemy (don't mark unsafe yet)
+            fast_dirs = game_map.get_unsafe_moves(ship.position, ship_target)
+            for fast_dir in fast_dirs:
+                new_pos = ship.position.directional_offset(fast_dir)
+                if not game_map[new_pos].is_occupied:
+                    move_dir = fast_dir
+                    tried_to_move = True
+                    if not game_map.opponent_adjacent(new_pos, me.id):
+                        need_to_evade = False
+                        break
+            if move_dir == Direction.Still and not game_map.opponent_adjacent(ship.position, me.id):
+                need_to_evade = False
+                tried_to_move = False
+            logging.info("ship {} plans to move {}, need evade? {}".format(ship.id, Direction.convert(move_dir), need_to_evade))
+
+            # Evasive movement (avoid enemy if possible, otherwise stay still) when returning to base
+            # and otherwise probabilistically evade based on ship/ship's position halite
+            evasiveness = 0.0
+            if ship_target == me.shipyard.position:
+                # TODO also if returning to dropoff
+                evasiveness = 1.0
             else:
-                # move_dir = game_map.cost_navigate(ship, ship_target)
-                move_dir = game_map.random_naive_navigate(ship, ship_target)
+                if move_dir == Direction.Still: # if planning to collect, how much left to collect here?
+                    evasiveness = 1 - gain_of_stay / constants.MAX_HALITE
+                else: # if planning to move, what are we risking?
+                    evasiveness = ship.halite_amount / constants.MAX_HALITE
+
+            if need_to_evade and random.random() < evasiveness:
+                move_dir = Direction.Still
                 tried_to_move = True
+                cardinal_dirs = Direction.get_all_cardinals()
+                random.shuffle(cardinal_dirs)
+                for defensive_dir in cardinal_dirs:
+                    def_pos = ship.position.directional_offset(defensive_dir)
+                    if not game_map[def_pos].is_occupied and not game_map.opponent_adjacent(def_pos, me.id):
+                        move_dir = defensive_dir
+                        game_map.mark_unsafe_move(ship, move_dir)
+                        logging.info("ship {} evading to {}!".format(ship.id, def_pos))
+                        break
+                if move_dir == Direction.Still:
+                    logging.info("ship {} evading but holding position {}!".format(ship.id, ship.position))
+            else:
+                # ship can collect or move. Decide based on how much there is to be
+                # gained by reaching target
+                if ship_target == me.shipyard.position:
+                    patience = cost_to_move / max(10.0, ship.halite_amount)
+                else:
+                    patience = gain_of_stay / max(10.0, game_map[ship_target].halite_amount * 0.25)
+
+                if random.random() < patience:
+                    move_dir = Direction.Still
+                    tried_to_move = False
+                else:
+                    # move_dir was set when checking whether you needed to evade
+                    # move_dir = game_map.random_naive_navigate(ship, ship_target)
+                    game_map.mark_unsafe_move(ship, move_dir)
+                    tried_to_move = True
+
         planned_moves[ship.id] = (move_dir, tried_to_move)
 
     # 4. Softlock detection/resolution
@@ -201,7 +254,6 @@ while True:
         if tried_to_move and move_dir == Direction.Still:
             original_dirs = game_map.get_unsafe_moves(ship.position, ship_targets[ship.id])
             success = False # able to resolve the softlock?
-            opponent_adjacent = False # able to resolve the softlock?
             for dir in original_dirs:
                 new_pos = ship.position.directional_offset(dir)
                 # logging.info("{} trying to move to {}".format(ship, new_pos))
@@ -228,25 +280,19 @@ while True:
                                 game_map.mark_unsafe_move(other_ship, other_dir)
                                 success = True
                                 break
-                elif other_ship.owner != me.id:
-                    opponent_adjacent = True
 
                 if success: break
 
             # If blocked by enemy ship(s), try a different direction that is safe from all enemy moves
-            if opponent_adjacent:
-                for dir in Direction.get_all_cardinals():
+            if game_map.opponent_adjacent(ship.position, me.id):
+                cardinal_dirs = Direction.get_all_cardinals()
+                random.shuffle(cardinal_dirs)
+                for dir in cardinal_dirs:
                     nbr_pos = ship.position.directional_offset(dir)
-                    if not game_map[nbr_pos].is_occupied:
-                        escape_safe = True
-                        for nbr_nbr_pos in nbr_pos.get_surrounding_cardinals():
-                            if game_map[nbr_nbr_pos].is_occupied and game_map[nbr_nbr_pos].ship.owner != me.id:
-                                escape_safe = False
-                                break
-                        if escape_safe:
-                            planned_moves[ship.id] = dir, tried_to_move
-                            game_map.mark_unsafe_move(ship, dir)
-                            break
+                    if not game_map[nbr_pos].is_occupied and not game_map.opponent_adjacent(nbr_pos, me.id):
+                        planned_moves[ship.id] = dir, tried_to_move
+                        game_map.mark_unsafe_move(ship, dir)
+                        break
 
     # 5. Send moves and update statistics
     for ship in me.get_ships():
@@ -254,8 +300,20 @@ while True:
         game_map.mark_unsafe_move(ship, move_dir)
         command_queue.append(ship.move(move_dir))
 
+        # TODO refactor this cost/gain calculation to avoid duplicated code
         cost_to_move = game_map[ship.position].halite_amount // constants.MOVE_COST_RATIO
         gain_of_stay = game_map[ship.position].halite_amount // constants.EXTRACT_RATIO
+        inspired = False
+        if constants.INSPIRATION_ENABLED:
+            opp_ship_count = 0
+            for near_pos in ship.position.get_within_radius(constants.INSPIRATION_RADIUS):
+                if game_map[near_pos].is_occupied and game_map[near_pos].ship.owner != me.id:
+                    opp_ship_count += 1
+            if opp_ship_count >= constants.INSPIRATION_SHIP_COUNT:
+                inspired = True
+                cost_to_move = game_map[ship.position].halite_amount // constants.INSPIRED_MOVE_COST_RATIO
+                gain_of_stay = (game_map[ship.position].halite_amount // constants.INSPIRED_EXTRACT_RATIO) * constants.INSPIRED_BONUS_MULTIPLIER
+        gain_of_stay = min(gain_of_stay, constants.MAX_HALITE - ship.halite_amount)
 
         if move_dir == Direction.Still:
             ship_stats[ship.id].halite_collected += gain_of_stay

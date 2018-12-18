@@ -5,4 +5,4 @@ REM halite.exe --replay-directory replays/ -vvv --width 32 --height 32 --seed 15
 REM This seed isn't very halite dense, good for testing inspire-based or collide/steal strategies
 REM halite.exe --replay-directory replays/ -vvv --width 32 --height 32 --seed 1545020736 "python MyBotv3_1.py" "python MyBotv4.py"
 
-halite.exe --replay-directory replays/ -vvv --width 32 --height 32 "python MyBotv3_1.py" "python MyBotv4.py"
+halite.exe --replay-directory replays/ -vvv --width 32 --height 32 "python MyBotv4.py" "python MyBotv4_1.py"

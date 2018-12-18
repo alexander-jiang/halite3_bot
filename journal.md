@@ -15,6 +15,8 @@ potentially unoccupied, unless another ship marked it as unsafe already)
   - Use mark_unsafe_move in random_naive_navigate instead of mark_unsafe
 - Added get_within_radius to hlt/positionals.py to get all positions that are at
 most some Manhattan distance away from the specified position
+- Added opponent_adjacent to hlt/game_map.py to simplify checking if there's an
+opponent ship adjacent to a given position
 
 ## To-do/Ideas
 - Navigation
@@ -62,7 +64,10 @@ most some Manhattan distance away from the specified position
   so that shipyard isn't occupied)
     - maybe extend this to say that the move off of the shipyard should be randomized to
     push the bots towards different regions in the map
-  - When returning to dropoff, try to avoid enemy ships ("defensive" navigation)
+  - ~~When returning to dropoff, try to avoid enemy ships ("evasive" navigation)~~
+    - ~~Not perfect as there could be several enemy ships nearby or a friendly ship~~
+    - improved to engage in "evasive" navigation with higher probability if ship is carrying
+    more cargo or if the ship has collected most of the square
   - Spawning too many ships in the mid-game? (some visualization of ship statistics would help, see below)
     - In bot v4, spawns are limited when the ships take longer to breakeven (though the first five spawns
     are always allowed, and spawns in the first 100 turns are also not limited)
@@ -74,18 +79,40 @@ most some Manhattan distance away from the specified position
   another dropoff option to avoid overcrowding the shipyard.
   - how quickly is the cost recovered over time?
 - Visualization of ship statistics:
-  - Still need to account for inspired halite collection to have accurate stats
-  - Can use these to determine when to stop spawning ships (i.e. how many turns does
-  it take for a ship to dropoff >1k halite?)
+  - ~~Still need to account for inspired halite collection to have accurate stats~~
+    - should refactor code to avoid duplicated "inspire"-checking code
+  - ~~Can use these to determine when to stop spawning ships (i.e. how many turns does
+  it take for a ship to dropoff >1k halite?)~~
   - for fun but also could help evaluate bots and debug issues
 
 ## Notes
+### 12/17/2018
+- Working on v4.1:
+  - evasive movement (avoid enemy if possible, otherwise stay still) when
+  returning (probabilistic for all ships, based on the ship's halite amount or
+  the halite at ship's position, depending on what the ship's planned move was)
+    - remaining collisions are attributable to poor target selection or having
+    too high of a return threshold (when the board is mostly empty, should risk
+    less halite in collisions)
+  - reworked targeting: only choose among local maxima, and weight the cell by
+  halite amount and distance to the cell (trying to approximate how many turns
+  it will take to travel there and back). As a result, v4.1 seems to perform
+  better than v4 in early game (gets early ships faster).
+  - Still doesn't reassign ship targets until the ship reaches target and
+  collects enough (so ship collisions that produce high-halite squares are often
+  overlooked by nearby ships)
+  - still doesn't use dropoffs (extremely helpful when collecting from a
+  collision square as the ship won't be able to carry the full amount and will
+  have to pay a higher cost to leave the collision square, as well as potentially
+  allowing nearby enemies to grab it)
+
 ### 12/16/2018
 - Submitted bot v4: it wins against v3.1 pretty consistently, though it wins
 by a larger margin when the halite density isn't high around the shipyards (i.e.
 in layouts where v3.1 struggles)
   - ship recall is more consistent
   - targeting is slightly improved
+  - increased max return threshold to 900 halite (from 500 halite in v3.1)
   - better able to escape softlock with friendly and enemy ships
   - added "inspire" mechanic
   - added more sophisticated ship-spawn decision: track the breakeven ages of

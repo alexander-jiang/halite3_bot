@@ -164,6 +164,12 @@ class GameMap:
                                   else Direction.invert(y_cardinality))
         return possible_moves
 
+    def opponent_adjacent(self, position, my_id):
+        for nbr_pos in position.get_surrounding_cardinals():
+            if self[nbr_pos].is_occupied and self[nbr_pos].ship.owner != my_id:
+                return True
+        return False
+
     def naive_navigate(self, ship, destination):
         """
         Returns a singular safe move towards the destination.
