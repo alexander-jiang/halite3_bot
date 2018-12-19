@@ -29,7 +29,7 @@ ship_targets = {} # maps ship IDs to their target destinations.
 ship_blockers = {} # maps ship IDs to ship ID(s) that are blocking them.
 ship_stats = {} # maps ship IDs to ShipStats object (see above)
 RECALL_MODE = False # whether to force ships to return to base and allow friendly ship collisions on shipyard/dropoffs
-breakeven_age = constants.MAX_TURNS # minimum number of turns it took for a ship to breakeven (helps determine when to stop spawning)
+max_breakeven_age = 3 # longest time for a ship to breakeven (helps determine when to stop spawning)
 min_num_ships = 5
 # end SETUP, start game
 
@@ -48,6 +48,13 @@ while True:
     logging.info("Efficiency = {}".format(efficiency))
     logging.info("Ships alive / spawned = {} / {}".format(len(me.get_ships()), spawned_ships))
 
+    # list of valid dropoff locations (includes dropoffs and the shipyard)
+    my_dropoffs = me.get_dropoffs()
+    my_dropoffs.append(me.shipyard)
+
+    if game.turn_number == 1:
+        logging.info("game_map[me.shipyard.position].structure = {}".format(game_map[me.shipyard.position].structure))
+        logging.info("my dropoffs: {}".format(my_dropoffs))
     next_ship_id = max([ship.id for ship in me.get_ships()]) + 1 if len(me.get_ships()) > 0 else 1
 
     # 1. Spawn decision (based on turn #, total # of turns, efficiency, "crowdedness" of shipyard and surrounding squares)
@@ -57,13 +64,13 @@ while True:
         if ship.id not in ship_stats:
             ship_stats[ship.id] = ShipStats(game.turn_number - 1, 0, 0, 0)
 
-    end_game_duration = breakeven_age * 1.1 # extra moves because board is emptier
+    end_game_duration = max_breakeven_age * 1.1 # extra moves because board is emptier
     shipyard_escape_sq = 0
     for nbr_pos in me.shipyard.position.get_surrounding_cardinals():
         if not game_map[nbr_pos].is_occupied:
             shipyard_escape_sq += 1
-    if ((len(me.get_ships()) < min_num_ships or game.turn_number <= 100 or game.turn_number < constants.MAX_TURNS - end_game_duration) and
-        not RECALL_MODE and me.halite_amount >= constants.SHIP_COST and
+    if (not RECALL_MODE and me.halite_amount >= constants.SHIP_COST and
+        (len(me.get_ships()) < min_num_ships or game.turn_number < constants.MAX_TURNS - end_game_duration) and
         not game_map[me.shipyard].is_occupied and shipyard_escape_sq > 0):
             logging.info("spawning a new ship")
             placeholder_ship = hlt.entity.Ship(me.id, next_ship_id, me.shipyard.position, 0)
@@ -82,15 +89,27 @@ while True:
     logging.info("return threshold = {}".format(return_threshold))
 
     # Which ships should be retargeted (aren't returning to base or being recalled)
+    ignore_ships = [] # list of ship IDs to ignore (e.g. turned into dropoffs)
     retarget_ships = [] # list of ship IDs to retarget
     for ship in me.get_ships():
-        logging.info("Ship {}: age={}, delivered={}".format(
-            ship.id, game.turn_number - ship_stats[ship.id].turn_of_birth,
-            ship_stats[ship.id].halite_delivered))
+        # logging.info("Ship {}: age={}, delivered={}".format(
+        #     ship.id, game.turn_number - ship_stats[ship.id].turn_of_birth,
+        #     ship_stats[ship.id].halite_delivered))
 
+        if ship.id in ignore_ships: # TODO more elegant way to ignore ships
+            continue
+
+        # If there's a lot of halite here, build a dropoff on it to secure it
+        if (game_map[ship.position].halite_amount + ship.halite_amount >= constants.MAX_HALITE * 1.5 and
+            me.halite_amount >= constants.DROPOFF_COST):
+                ignore_ships.append(ship.id)
+                logging.info("building dropoff at {}".format(game_map[ship.position]))
+                command_queue.append(ship.make_dropoff())
+
+        closest_drop_id, closest_drop_pos = game_map.get_closest(ship.position, my_dropoffs)
         if RECALL_MODE or ship.halite_amount >= return_threshold:
-            # TODO retarget to nearest dropoff? maybe even favor a dropoff since shipyard may spawn ships?
-            ship_targets[ship.id] = me.shipyard.position
+            # retarget to nearest dropoff or shipyard
+            ship_targets[ship.id] = closest_drop_pos
         # else:
         #     retarget_ships.append(ship)
         elif ship.position == ship_targets[ship.id]:
@@ -99,13 +118,11 @@ while True:
             ### to shipyard/dropoff only? or for all) in case of collisions suddenly
             ### changing the ideal target?
 
-            # after arriving at target, only retarget if at shipyard or collected enough halite
-            # TODO check if at a dropoff
-            if ship.position == me.shipyard.position or game_map[ship.position].halite_amount < target_halite_threshold:
+            # after arriving at target, only retarget if at shipyard/dropoff or collected enough halite
+            if game_map.at_dropoff(ship.position, me.id) or game_map[ship.position].halite_amount < target_halite_threshold:
                 retarget_ships.append(ship)
 
-        # TODO check distance to nearest dropoff
-        return_dist = game_map.calculate_distance(ship.position, me.shipyard.position)
+        return_dist = game_map.calculate_distance(ship.position, closest_drop_pos)
         if constants.MAX_TURNS - game.turn_number <= return_dist:
             # logging.info(
             #     "RECALL_MODE activated by ship {} distance {}"
@@ -130,6 +147,8 @@ while True:
         # logging.info("{} local maxima".format(len(cells)))
         delay_factor = 1.2 # how often will ship have to stop to refuel or to avoid collision?
         for ship in retarget_ships:
+            if ship.id in ignore_ships:
+                continue
             def cell_weight_func(cell):
                 return cell.halite_amount / max(1.0, 2.0 * delay_factor * game_map.calculate_distance(ship.position, cell.position))
             decorated_cells = []
@@ -144,18 +163,21 @@ while True:
                     ship_targets[ship.id] = best_target_position
                     break
 
-    # Override: if enemy ship is on shipyard, ignore it for collision purposes
-    # TODO also consider dropoffs
-    if game_map[me.shipyard.position].is_occupied and game_map[me.shipyard.position].ship.owner != me.id:
-        game_map[me.shipyard.position].ship = None
+    # Override: if enemy ship is on my shipyard/dropoff, ignore it for collision purposes
+    for my_drop in my_dropoffs:
+        if game_map[my_drop.position].is_occupied and game_map[my_drop.position].ship.owner != me.id:
+            game_map[my_drop.position].ship = None
 
     # 3. Movement behavior (execute movement towards target, maybe with certain amount of randomness or "impatience")
     planned_moves = {}
     for ship in me.get_ships():
+        if ship.id in ignore_ships:
+            continue
+        closest_drop_id, closest_drop_pos = game_map.get_closest(ship.position, my_dropoffs)
         if RECALL_MODE:
-            # TODO retarget to nearest dropoff?
-            ship_targets[ship.id] = me.shipyard.position
-            game_map[me.shipyard.position].ship = None
+            ship_targets[ship.id] = closest_drop_pos
+            for my_drop in my_dropoffs:
+                game_map[my_drop.position].ship = None
 
         ship_target = ship_targets[ship.id]
         # TODO refactor this cost/gain calculation to avoid duplicated code
@@ -205,8 +227,7 @@ while True:
             # Evasive movement (avoid enemy if possible, otherwise stay still) when returning to base
             # and otherwise probabilistically evade based on ship/ship's position halite
             evasiveness = 0.0
-            if ship_target == me.shipyard.position:
-                # TODO also if returning to dropoff
+            if game_map.at_dropoff(ship_target, me.id):
                 evasiveness = 1.0
             else:
                 if move_dir == Direction.Still: # if planning to collect, how much left to collect here?
@@ -231,7 +252,7 @@ while True:
             else:
                 # ship can collect or move. Decide based on how much there is to be
                 # gained by reaching target
-                if ship_target == me.shipyard.position:
+                if game_map.at_dropoff(ship_target, me.id):
                     patience = cost_to_move / max(10.0, ship.halite_amount)
                 else:
                     patience = gain_of_stay / max(10.0, game_map[ship_target].halite_amount * 0.25)
@@ -249,6 +270,8 @@ while True:
 
     # 4. Softlock detection/resolution
     for ship in me.get_ships():
+        if ship.id in ignore_ships:
+            continue
         move_dir, tried_to_move = planned_moves[ship.id]
         # Is the ship blocked or just collecting?
         if tried_to_move and move_dir == Direction.Still:
@@ -263,7 +286,7 @@ while True:
                     planned_moves[ship.id] = dir, tried_to_move
                     game_map.mark_unsafe_move(ship, dir)
                     success = True
-                elif other_ship.owner == me.id and other_ship.id in planned_moves: # TODO can't check with ship owner ID since the placeholder ship at spawn above is also "friendly"
+                elif other_ship.owner == me.id and other_ship.id in planned_moves: # note: can't check with ship owner ID since the placeholder ship at spawn above is also "friendly"
                     # Is the blocking ship friendly?
                     # logging.info("other ship {}".format(other_ship))
                     other_move_dir, other_tried_to_move = planned_moves[other_ship.id]
@@ -296,6 +319,8 @@ while True:
 
     # 5. Send moves and update statistics
     for ship in me.get_ships():
+        if ship.id in ignore_ships:
+            continue
         move_dir, tried_to_move = planned_moves[ship.id]
         game_map.mark_unsafe_move(ship, move_dir)
         command_queue.append(ship.move(move_dir))
@@ -320,16 +345,15 @@ while True:
         else:
             ship_stats[ship.id].distance_traveled += 1
 
-        # TODO check if at a dropoff
-        if ship.position.directional_offset(move_dir) == me.shipyard.position:
+        if game_map.at_dropoff(ship.position.directional_offset(move_dir), me.id):
             not_yet_breakeven = ship_stats[ship.id].halite_delivered < constants.SHIP_COST
             ship_stats[ship.id].halite_delivered += ship.halite_amount - cost_to_move
             total_halite_collected += ship.halite_amount - cost_to_move
 
             ship_age = game.turn_number - ship_stats[ship.id].turn_of_birth
-            if not_yet_breakeven and ship_stats[ship.id].halite_delivered >= constants.SHIP_COST:
-                logging.info("most recent breakeven age is now {} from ship {}".format(ship_age, ship.id))
-                breakeven_age = ship_age
+            if not_yet_breakeven and ship_stats[ship.id].halite_delivered >= constants.SHIP_COST and ship_age > max_breakeven_age:
+                logging.info("longest breakeven age is now {} from ship {}".format(ship_age, ship.id))
+                max_breakeven_age = ship_age
 
 
     # Send your moves back to the game environment, ending this turn.

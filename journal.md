@@ -17,6 +17,8 @@ potentially unoccupied, unless another ship marked it as unsafe already)
 most some Manhattan distance away from the specified position
 - Added opponent_adjacent to hlt/game_map.py to simplify checking if there's an
 opponent ship adjacent to a given position
+- Added get_closest to hlt/game_map.py to simplify checking for the closest entity
+(e.g. closest dropoff or shipyard, closest ship, etc.) to a given position
 
 ## To-do/Ideas
 - Navigation
@@ -88,6 +90,28 @@ opponent ship adjacent to a given position
   - for fun but also could help evaluate bots and debug issues
 
 ## Notes
+### 12/18/2018
+- v4.1 tweaks:
+  - breakeven now tracks the max # turns it took for a ship to breakeven (should
+  help prevent spawning too many ships)
+  - TODO: large target squares (e.g. after collision) should "take" ship's targets
+  (multiple ships, if needed)
+- v4.1 is doing very well! but some replay analysis:
+  - in this 1v1 victory, v4.1 falls behind in early ship production (probably
+  important for a large board 1v1), likely due to its lower return threshold and
+  thus lower efficiency:
+    - https://halite.io/play/?game_id=3297620&replay_class=1&replay_name=replay-20181218-154153%2B0000-1545147690-48-48-3297620
+  - in this 4-way loss (4th place), v4.1 similarly falls behind to the other three
+  in early ship production but then produces too many ships (75 total!) and thus
+  loses by a wide margin (behind 1st place by about 30k halite, a gap that could've
+  been overcome by more cautiously investing in building ships)
+    - https://halite.io/play/?game_id=3296734&replay_class=1&replay_name=replay-20181218-151456%2B0000-1545145855-32-32-3296734
+  - this 1v1 loss is somewhat surprising: v4.1 stays ahead in ship production,
+  but it seems like each ship is not getting as much value as the opponent's ships
+  are (also the opponent brings more ships to the region around (31, 16) first),
+  and ultimately, the loss is a (relatively) close one:
+    - https://halite.io/play/?game_id=3295956&replay_class=1&replay_name=replay-20181218-145640%2B0000-1545144956-64-64-3295956
+
 ### 12/17/2018
 - Working on v4.1 (submitted v4.1 as submission 6):
   - evasive movement (avoid enemy if possible, otherwise stay still) when

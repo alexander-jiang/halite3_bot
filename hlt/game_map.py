@@ -103,6 +103,27 @@ class GameMap:
         return min(resulting_position.x, self.width - resulting_position.x) + \
             min(resulting_position.y, self.height - resulting_position.y)
 
+    def get_closest(self, source, entities):
+        """
+        Given a start position and a list of entities (see entity.py), returns
+        the ID and position of the closest entity to the position.
+        """
+        if len(entities) == 0: return None, None
+        source = self.normalize(source)
+        min_dist = float('inf')
+        closest_entity = None
+        for entity in entities:
+            dist = self.calculate_distance(source, entity.position)
+            if dist < min_dist:
+                min_dist = dist
+                closest_entity = entity
+        return closest_entity.id, closest_entity.position
+
+    def at_dropoff(self, source, player_id):
+        """Returns whether a position contains a friendly shipyard or dropoff"""
+        source = self.normalize(source)
+        return self[source].has_structure and self[source].structure.owner == player_id
+
     def normalize(self, position):
         """
         Normalized the position within the bounds of the toroidal map.
@@ -165,6 +186,11 @@ class GameMap:
         return possible_moves
 
     def opponent_adjacent(self, position, my_id):
+        """
+        Returns whether any positions adjacent to the given position are
+        occupied by enemy ships.
+        """
+        position = self.normalize(position)
         for nbr_pos in position.get_surrounding_cardinals():
             if self[nbr_pos].is_occupied and self[nbr_pos].ship.owner != my_id:
                 return True
