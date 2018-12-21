@@ -19,6 +19,8 @@ most some Manhattan distance away from the specified position
 opponent ship adjacent to a given position
 - Added get_closest to hlt/game_map.py to simplify checking for the closest entity
 (e.g. closest dropoff or shipyard, closest ship, etc.) to a given position
+- Added is_inspired, get_move_cost, and get_collect_amt helper functions to the
+game_map.py file
 
 ## To-do/Ideas
 - Navigation
@@ -76,6 +78,8 @@ opponent ship adjacent to a given position
     - In bot v4 and later, spawns are limited when the ships take longer to breakeven (though the first five spawns
     are always allowed, and spawns in the first 100 turns are also not limited)
   - ~~Don't fail when an enemy ship occupies the shipyard (just collide with it and take its halite)~~
+  - one trick/trap strategy: try building dropoffs near/around enemy shipyard and force
+  enemy ships to collide on your dropoffs, thus stealing their halite
 - **Building dropoffs**:
   - benefits of building the dropoff: instantly collects when there's a lot of halite
   and ships don't have enough capacity. Also lets you explore further (don't have
@@ -88,12 +92,57 @@ opponent ship adjacent to a given position
   - ~~Can use these to determine when to stop spawning ships (i.e. how many turns does
   it take for a ship to dropoff >1k halite?)~~
   - for fun but also could help evaluate bots and debug issues
+  - interesting visualization idea: how much of each cell was collected by each player
+  or not collected at all
 
 ## Notes
+### 12/20/2018
+- v4.2 tweaks aren't leading anywhere productive: I need more insight into what to
+optimize for: average halite per turn? mining efficiency? halite delivered per ship?
+how are these metrics correlated?
+  - went basically back to the drawing board on v4.2 and just left in some bugfixes:
+    - added code to check for dropoffs and shipyards
+    - added code to prevent spending more halite than you have on one turn (e.g.
+      if you try to build multiple dropoffs), but the v4.2 doesn't actually use
+      dropoffs right now
+    - one small change: tweaked the "target_halite_threshold" to be the min of 100
+    and the average of nearby (within radius 2) squares' halite amounts to better
+    collect in late game (when nearby squares are all pretty low-halite). Impact
+    isn't tested (probably minimal)
+    - also changed: made target cells have to be greater than average of adjacent
+    cells, not the local maxima (allows more cells to be considered targets, so
+    that not just one ship is sent to a high-density region)
+  - there were a lot of timeout issues when I tried adding more features. Perhaps it's
+  time to investigate moving away from Python? or just looking for optimizations in
+  the bot code (there's surely some opportunities)
+- working on diving deeper into analyzing bots with a replay file visualizer.
+Since I'm traveling tomorrow anyways, this will be a good break from staring at
+replays on the halite website, and a chance to re-evaluate things from the ground up
+  - Got a great head start by finding the replay parser from the ML-bot starter
+  kit from Halite github (found with help from this forum post:
+  https://forums.halite.io/t/how-can-i-get-iterative-json-game-data-of-game-statistics/885)
+
+### 12/19/2018
+- more v4.2 tweaks (not ready to submit yet, the bot doesn't consistently perform
+significantly better than v4.1):
+  - fixed some bugs with statistics on collection (fixed inspired bonus multiplier,
+  base collection amount should be rounded up, etc.)
+- Explored the forums a little bit:
+  - found this site created by a user with stats on the games: https://halite2018.mlomb.me/
+    - main insights are that v4.1 is somehow significantly weaker in 32x32 2P games (its
+    best 2P game size is 40x40; it has a 50-56% winrate on the larger boards) and
+    definitely weaker in 32x32 4P games.
+  - also found a "benchmark" bot by Two Sigma: https://halite.io/user/?user_id=185.
+  It's currently ranked \#51, which is a pretty ambitious goal for me to beat, but I think
+  I can get there (v4.1 is currently around 390-400th in rankings)
+  - there's also some advice in the Two Sigma "midseason" post here:
+  https://forums.halite.io/t/game-observations-context-matters/1074
+
 ### 12/18/2018
-- v4.1 tweaks:
+- v4.2 tweaks:
   - breakeven now tracks the max # turns it took for a ship to breakeven (should
   help prevent spawning too many ships)
+  - dropoffs are built when ship is on square with enough halite
   - TODO: large target squares (e.g. after collision) should "take" ship's targets
   (multiple ships, if needed)
 - v4.1 is doing very well! but some replay analysis:

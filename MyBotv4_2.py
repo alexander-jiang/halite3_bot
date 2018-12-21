@@ -7,6 +7,7 @@ from hlt import positionals
 from hlt import util
 from hlt.positionals import Direction, Position
 
+import csv
 import random
 import logging
 
@@ -47,14 +48,12 @@ while True:
     # TODO why doesn't this efficiency match the replay's efficiency stat?
     logging.info("Efficiency = {}".format(efficiency))
     logging.info("Ships alive / spawned = {} / {}".format(len(me.get_ships()), spawned_ships))
+    halite_to_spend = me.halite_amount
 
     # list of valid dropoff locations (includes dropoffs and the shipyard)
     my_dropoffs = me.get_dropoffs()
     my_dropoffs.append(me.shipyard)
 
-    if game.turn_number == 1:
-        logging.info("game_map[me.shipyard.position].structure = {}".format(game_map[me.shipyard.position].structure))
-        logging.info("my dropoffs: {}".format(my_dropoffs))
     next_ship_id = max([ship.id for ship in me.get_ships()]) + 1 if len(me.get_ships()) > 0 else 1
 
     # 1. Spawn decision (based on turn #, total # of turns, efficiency, "crowdedness" of shipyard and surrounding squares)
@@ -69,7 +68,7 @@ while True:
     for nbr_pos in me.shipyard.position.get_surrounding_cardinals():
         if not game_map[nbr_pos].is_occupied:
             shipyard_escape_sq += 1
-    if (not RECALL_MODE and me.halite_amount >= constants.SHIP_COST and
+    if (not RECALL_MODE and halite_to_spend >= constants.SHIP_COST and
         (len(me.get_ships()) < min_num_ships or game.turn_number < constants.MAX_TURNS - end_game_duration) and
         not game_map[me.shipyard].is_occupied and shipyard_escape_sq > 0):
             logging.info("spawning a new ship")
@@ -77,41 +76,45 @@ while True:
             game_map[me.shipyard.position].mark_unsafe(placeholder_ship)
             command_queue.append(game.me.shipyard.spawn())
             spawned_ships += 1
+            halite_to_spend -= constants.SHIP_COST
 
     # 2. Reassign ship targets (could be a halite-dense region, a shipyard, a dropoff, etc.)
-    # Parameters:
-    # only stay on targets with at least this much halite
-    target_halite_threshold = constants.MAX_HALITE * 0.1
-    # once collected enough, return the ship to base
-    ### TODO FIRST ****
-    ### dynamic return threshold: based on distance from shipyard, nearby halite, number of ships, game turn number, etc.
-    return_threshold = constants.MAX_HALITE * min(0.9, 0.2 + game.turn_number / 200.0)
-    logging.info("return threshold = {}".format(return_threshold))
-
     # Which ships should be retargeted (aren't returning to base or being recalled)
-    ignore_ships = [] # list of ship IDs to ignore (e.g. turned into dropoffs)
-    retarget_ships = [] # list of ship IDs to retarget
+    # TODO way to not give multiple commands to ship (e.g. dropoff vs. move)
+    retarget_ships = [] # list of ships to retarget
     for ship in me.get_ships():
         # logging.info("Ship {}: age={}, delivered={}".format(
         #     ship.id, game.turn_number - ship_stats[ship.id].turn_of_birth,
         #     ship_stats[ship.id].halite_delivered))
 
-        if ship.id in ignore_ships: # TODO more elegant way to ignore ships
-            continue
-
-        # If there's a lot of halite here, build a dropoff on it to secure it
-        if (game_map[ship.position].halite_amount + ship.halite_amount >= constants.MAX_HALITE * 1.5 and
-            me.halite_amount >= constants.DROPOFF_COST):
-                ignore_ships.append(ship.id)
-                logging.info("building dropoff at {}".format(game_map[ship.position]))
-                command_queue.append(ship.make_dropoff())
-
         closest_drop_id, closest_drop_pos = game_map.get_closest(ship.position, my_dropoffs)
-        if RECALL_MODE or ship.halite_amount >= return_threshold:
+        dist_to_dropoff = game_map.calculate_distance(ship.position, closest_drop_pos)
+
+        # TODO If enough halite on this square (e.g. collision), build a dropoff on it to secure it
+        # TODO If there's enough halite in the nearby area and we're far from nearest dropoff, build a dropoff
+        # also account for late game (dropoffs are less good) and number of nearby friendly/enemy ships
+
+        total_nearby = 0
+        open_nearby = 0
+        nearby_positions = ship.position.get_within_radius(2)
+        for pos in nearby_positions:
+            if pos != ship.position and not game_map[pos].is_occupied:
+                total_nearby += game_map[pos].halite_amount
+                open_nearby += 1
+        avg_nearby = total_nearby / max(open_nearby, 1)
+        # Parameters:
+        # only stay on targets with at least this much halite
+        target_halite_threshold = min(constants.MAX_HALITE * 0.1, avg_nearby)
+        # once collected enough, return the ship to base
+        ### TODO FIRST ****
+        ### dynamic return threshold: based on distance from shipyard, nearby halite, number of ships, game turn number, etc.
+        # TODO increase return threshold at early game, especia,ly when nearby avg is high
+        force_return_threshold = constants.MAX_HALITE * min(0.9, 0.2 + game.turn_number / 200.0)
+        logging.info("return threshold = {}".format(force_return_threshold))
+
+        if RECALL_MODE or ship.halite_amount >= force_return_threshold:
             # retarget to nearest dropoff or shipyard
             ship_targets[ship.id] = closest_drop_pos
-        # else:
-        #     retarget_ships.append(ship)
         elif ship.position == ship_targets[ship.id]:
             ### TODO *************
             ### maybe allow target to refresh every round (for ships not heading
@@ -132,25 +135,30 @@ while True:
 
     # Per ship, reassign its target based on halite amount and distance
     if not RECALL_MODE:
-        # Precompute potential targets (all local maxima, sorted in descending halite amount)
+        # Precompute potential targets (all cells with more than average of neighbors, sorted in descending halite amount)
+
         cells = []
-        for x in range(game_map.width):
-            for y in range(game_map.height):
+        for x in range(constants.WIDTH):
+            for y in range(constants.HEIGHT):
                 pos = Position(x, y)
-                local_max = True
+                nearby_amt = 0
                 for nbr_pos in pos.get_surrounding_cardinals():
-                    if game_map[nbr_pos].halite_amount > game_map[pos].halite_amount:
-                        local_max = False
-                        break
-                if local_max:
+                    nearby_amt += game_map[nbr_pos].halite_amount
+                avg_nearby = nearby_amt / 4.0
+                if game_map[pos].halite_amount > avg_nearby:
                     cells.append(game_map[pos])
-        # logging.info("{} local maxima".format(len(cells)))
+
+                #### TODO FIRST: large target squares (e.g. after collision) should "take" nearby ship's targets
+                #### (multiple ships, if needed)
+
+        # logging.info("{} possible targets".format(len(cells)))
         delay_factor = 1.2 # how often will ship have to stop to refuel or to avoid collision?
         for ship in retarget_ships:
-            if ship.id in ignore_ships:
-                continue
+            closest_drop_id, closest_drop_pos = game_map.get_closest(ship.position, my_dropoffs)
             def cell_weight_func(cell):
-                return cell.halite_amount / max(1.0, 2.0 * delay_factor * game_map.calculate_distance(ship.position, cell.position))
+                time_to_target = delay_factor * game_map.calculate_distance(ship.position, cell.position)
+                time_to_return = delay_factor * game_map.calculate_distance(cell.position, closest_drop_pos)
+                return cell.halite_amount / max(1.0, time_to_target + time_to_return)
             decorated_cells = []
             for cell in cells:
                 decorated_cells.append((cell_weight_func(cell), cell))
@@ -171,8 +179,6 @@ while True:
     # 3. Movement behavior (execute movement towards target, maybe with certain amount of randomness or "impatience")
     planned_moves = {}
     for ship in me.get_ships():
-        if ship.id in ignore_ships:
-            continue
         closest_drop_id, closest_drop_pos = game_map.get_closest(ship.position, my_dropoffs)
         if RECALL_MODE:
             ship_targets[ship.id] = closest_drop_pos
@@ -180,20 +186,8 @@ while True:
                 game_map[my_drop.position].ship = None
 
         ship_target = ship_targets[ship.id]
-        # TODO refactor this cost/gain calculation to avoid duplicated code
-        cost_to_move = game_map[ship.position].halite_amount // constants.MOVE_COST_RATIO
-        gain_of_stay = game_map[ship.position].halite_amount // constants.EXTRACT_RATIO
-        inspired = False
-        if constants.INSPIRATION_ENABLED:
-            opp_ship_count = 0
-            for near_pos in ship.position.get_within_radius(constants.INSPIRATION_RADIUS):
-                if game_map[near_pos].is_occupied and game_map[near_pos].ship.owner != me.id:
-                    opp_ship_count += 1
-            if opp_ship_count >= constants.INSPIRATION_SHIP_COUNT:
-                inspired = True
-                cost_to_move = game_map[ship.position].halite_amount // constants.INSPIRED_MOVE_COST_RATIO
-                gain_of_stay = (game_map[ship.position].halite_amount // constants.INSPIRED_EXTRACT_RATIO) * constants.INSPIRED_BONUS_MULTIPLIER
-        gain_of_stay = min(gain_of_stay, constants.MAX_HALITE - ship.halite_amount)
+        cost_to_move = game_map.get_move_cost(ship)
+        gain_of_stay = game_map.get_collect_amt(ship)
 
         logging.info("Ship {} at {}, target={}".format(ship.id, ship.position, ship_target))
 
@@ -222,7 +216,7 @@ while True:
             if move_dir == Direction.Still and not game_map.opponent_adjacent(ship.position, me.id):
                 need_to_evade = False
                 tried_to_move = False
-            logging.info("ship {} plans to move {}, need evade? {}".format(ship.id, Direction.convert(move_dir), need_to_evade))
+            # logging.info("ship {} plans to move {}, need evade? {}".format(ship.id, Direction.convert(move_dir), need_to_evade))
 
             # Evasive movement (avoid enemy if possible, otherwise stay still) when returning to base
             # and otherwise probabilistically evade based on ship/ship's position halite
@@ -245,10 +239,10 @@ while True:
                     if not game_map[def_pos].is_occupied and not game_map.opponent_adjacent(def_pos, me.id):
                         move_dir = defensive_dir
                         game_map.mark_unsafe_move(ship, move_dir)
-                        logging.info("ship {} evading to {}!".format(ship.id, def_pos))
+                        # logging.info("ship {} evading to {}!".format(ship.id, def_pos))
                         break
-                if move_dir == Direction.Still:
-                    logging.info("ship {} evading but holding position {}!".format(ship.id, ship.position))
+                # if move_dir == Direction.Still:
+                #     logging.info("ship {} evading but holding position {}!".format(ship.id, ship.position))
             else:
                 # ship can collect or move. Decide based on how much there is to be
                 # gained by reaching target
@@ -270,8 +264,6 @@ while True:
 
     # 4. Softlock detection/resolution
     for ship in me.get_ships():
-        if ship.id in ignore_ships:
-            continue
         move_dir, tried_to_move = planned_moves[ship.id]
         # Is the ship blocked or just collecting?
         if tried_to_move and move_dir == Direction.Still:
@@ -319,26 +311,12 @@ while True:
 
     # 5. Send moves and update statistics
     for ship in me.get_ships():
-        if ship.id in ignore_ships:
-            continue
         move_dir, tried_to_move = planned_moves[ship.id]
         game_map.mark_unsafe_move(ship, move_dir)
         command_queue.append(ship.move(move_dir))
 
-        # TODO refactor this cost/gain calculation to avoid duplicated code
-        cost_to_move = game_map[ship.position].halite_amount // constants.MOVE_COST_RATIO
-        gain_of_stay = game_map[ship.position].halite_amount // constants.EXTRACT_RATIO
-        inspired = False
-        if constants.INSPIRATION_ENABLED:
-            opp_ship_count = 0
-            for near_pos in ship.position.get_within_radius(constants.INSPIRATION_RADIUS):
-                if game_map[near_pos].is_occupied and game_map[near_pos].ship.owner != me.id:
-                    opp_ship_count += 1
-            if opp_ship_count >= constants.INSPIRATION_SHIP_COUNT:
-                inspired = True
-                cost_to_move = game_map[ship.position].halite_amount // constants.INSPIRED_MOVE_COST_RATIO
-                gain_of_stay = (game_map[ship.position].halite_amount // constants.INSPIRED_EXTRACT_RATIO) * constants.INSPIRED_BONUS_MULTIPLIER
-        gain_of_stay = min(gain_of_stay, constants.MAX_HALITE - ship.halite_amount)
+        cost_to_move = game_map.get_move_cost(ship)
+        gain_of_stay = game_map.get_collect_amt(ship)
 
         if move_dir == Direction.Still:
             ship_stats[ship.id].halite_collected += gain_of_stay
@@ -349,6 +327,8 @@ while True:
             not_yet_breakeven = ship_stats[ship.id].halite_delivered < constants.SHIP_COST
             ship_stats[ship.id].halite_delivered += ship.halite_amount - cost_to_move
             total_halite_collected += ship.halite_amount - cost_to_move
+            # if not RECALL_MODE:
+            #     logging.info("{} drops off {} this turn".format(ship, ship.halite_amount - cost_to_move))
 
             ship_age = game.turn_number - ship_stats[ship.id].turn_of_birth
             if not_yet_breakeven and ship_stats[ship.id].halite_delivered >= constants.SHIP_COST and ship_age > max_breakeven_age:
