@@ -124,6 +124,32 @@ class GameMap:
         source = self.normalize(source)
         return self[source].has_structure and self[source].structure.owner == player_id
 
+    def is_inspired(self, ship):
+        """Returns whether the ship is inspired"""
+        if constants.INSPIRATION_ENABLED:
+            opp_ship_count = 0
+            for near_pos in ship.position.get_within_radius(constants.INSPIRATION_RADIUS):
+                if self[near_pos].is_occupied and self[near_pos].ship.owner != ship.owner:
+                    opp_ship_count += 1
+            if opp_ship_count >= constants.INSPIRATION_SHIP_COUNT:
+                return True
+        return False
+
+    def get_move_cost(self, ship):
+        """Returns the cost to move the ship in any direction"""
+        cost_to_move = self[ship.position].halite_amount // constants.MOVE_COST_RATIO
+        if self.is_inspired(ship):
+            cost_to_move = self[ship.position].halite_amount // constants.INSPIRED_MOVE_COST_RATIO
+        return cost_to_move
+
+    def get_collect_amt(self, ship):
+        """Returns the amount of halite gained by ship staying still"""
+        gain_of_stay = math.ceil(self[ship.position].halite_amount / constants.EXTRACT_RATIO)
+        if self.is_inspired(ship):
+            gain_of_stay += math.ceil(self[ship.position].halite_amount / constants.INSPIRED_EXTRACT_RATIO) * constants.INSPIRED_BONUS_MULTIPLIER
+        gain_of_stay = min(gain_of_stay, constants.MAX_HALITE - ship.halite_amount)
+        return math.ceil(gain_of_stay)
+
     def normalize(self, position):
         """
         Normalized the position within the bounds of the toroidal map.
